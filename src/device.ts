@@ -431,6 +431,7 @@ export class OpenDisplayDevice {
       compress?: boolean;
       onProgress?: (current: number, total: number, stage: string) => void;
       onStatusChange?: (message: string) => void;
+      onUploadComplete?: (uploadTimeSeconds: number) => void;
     } = {}
   ): Promise<void> {
     this.ensureConnected();
@@ -441,6 +442,7 @@ export class OpenDisplayDevice {
     const compress = options.compress ?? true;
     const onProgress = options.onProgress;
     const onStatusChange = options.onStatusChange;
+    const onUploadComplete = options.onUploadComplete;
 
     console.log(
       `Uploading image (${this.width}x${this.height}, ${ColorScheme[this.colorScheme]})`
@@ -473,6 +475,7 @@ export class OpenDisplayDevice {
           uncompressedSize: encodedData.length,
           onProgress,
           onStatusChange,
+          onUploadComplete,
         });
       } else {
         console.log(
@@ -484,6 +487,7 @@ export class OpenDisplayDevice {
           refreshMode,
           onProgress,
           onStatusChange,
+          onUploadComplete,
         });
       }
     } else {
@@ -494,6 +498,7 @@ export class OpenDisplayDevice {
         refreshMode,
         onProgress,
         onStatusChange,
+        onUploadComplete,
       });
     }
 
@@ -512,6 +517,7 @@ export class OpenDisplayDevice {
     uncompressedSize?: number;
     onProgress?: (current: number, total: number, stage: string) => void;
     onStatusChange?: (message: string) => void;
+    onUploadComplete?: (uploadTimeSeconds: number) => void;
   }): Promise<void> {
     const {
       imageData,
@@ -521,10 +527,13 @@ export class OpenDisplayDevice {
       uncompressedSize,
       onProgress,
       onStatusChange,
+      onUploadComplete,
     } = params;
 
     // Clear any stale responses from previous operations
     this.connection!.clearQueue();
+
+    const uploadStartTime = Date.now();
 
     // 1. Send START command (different for each protocol)
     let startCmd: Uint8Array;
@@ -559,15 +568,46 @@ export class OpenDisplayDevice {
 
     // 4. Send END command if needed (identical for both protocols)
     if (!autoCompleted) {
-      onStatusChange?.('Refreshing display...');
       const endCmd = buildDirectWriteEndCommand(refreshMode);
       await this.connection!.writeCommand(endCmd);
 
-      // Wait for END ACK (90s timeout for display refresh)
+      // Wait for END ACK
       response = await this.connection!.readResponse(
-        OpenDisplayDevice.TIMEOUT_REFRESH
+        OpenDisplayDevice.TIMEOUT_ACK
       );
       validateAckResponse(response, CommandCode.DIRECT_WRITE_END);
+
+      // Upload complete - chunks sent and END acknowledged
+      const uploadTime = (Date.now() - uploadStartTime) / 1000;
+      onUploadComplete?.(uploadTime);
+      onStatusChange?.(
+        `Upload complete (${uploadTime.toFixed(1)}s), refreshing display...`
+      );
+
+      // 5. Wait for refresh completion notification (0x0073 or 0x0074)
+      const refreshStartTime = Date.now();
+      const refreshResponse = await this.connection!.readResponse(
+        OpenDisplayDevice.TIMEOUT_REFRESH
+      );
+
+      const [responseCode] = checkResponseType(refreshResponse);
+
+      if (responseCode === CommandCode.REFRESH_COMPLETE) {
+        const refreshTime = (Date.now() - refreshStartTime) / 1000;
+        const totalTime = (Date.now() - uploadStartTime) / 1000;
+        console.log(
+          `Refresh complete (${refreshTime.toFixed(1)}s), total time: ${totalTime.toFixed(1)}s`
+        );
+        onStatusChange?.(
+          `Refresh complete (${refreshTime.toFixed(1)}s)`
+        );
+      } else if (responseCode === CommandCode.REFRESH_TIMEOUT) {
+        throw new ProtocolError('Display refresh timed out');
+      } else {
+        throw new ProtocolError(
+          `Unexpected refresh response: 0x${responseCode.toString(16).padStart(4, '0')}`
+        );
+      }
     }
   }
 
