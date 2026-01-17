@@ -1,6 +1,6 @@
 {
   "name": "@opendisplay/opendisplay",
-  "version": "1.1.5",
+  "version": "1.2.0",
   "description": "TypeScript library for OpenDisplay BLE e-paper displays (Web Bluetooth)",
   "type": "module",
   "main": "./dist/index.cjs",
