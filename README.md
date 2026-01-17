@@ -142,6 +142,54 @@ await device.uploadImage(imageData, {
 });
 ```
 
+### Upload Progress & Callbacks
+
+The `uploadImage()` method supports several optional callbacks for tracking progress and timing:
+
+```typescript
+await device.uploadImage(imageData, {
+  refreshMode: RefreshMode.FULL,
+  ditherMode: DitherMode.BURKES,
+  compress: true,
+
+  // Called during data transfer with progress updates
+  onProgress: (current, total, stage) => {
+    const percent = Math.floor((current / total) * 100);
+    console.log(`${stage}: ${percent}% (${current}/${total} bytes)`);
+  },
+
+  // Called at various stages with status messages
+  onStatusChange: (message) => {
+    console.log(`Status: ${message}`);
+    // Example messages:
+    // - "Preparing image..."
+    // - "Compressing..."
+    // - "Uploading..."
+    // - "Upload complete (X.Xs), refreshing display..."
+    // - "Refresh complete (Y.Ys)"
+  },
+
+  // Called when upload is complete (before display refresh)
+  onUploadComplete: (uploadTimeSeconds) => {
+    console.log(`Upload took ${uploadTimeSeconds.toFixed(1)}s`);
+  },
+
+  // Called when entire operation completes (upload + refresh)
+  onComplete: (uploadTime, refreshTime, totalTime) => {
+    console.log(`Complete! Upload: ${uploadTime.toFixed(1)}s, Refresh: ${refreshTime.toFixed(1)}s, Total: ${totalTime.toFixed(1)}s`);
+  }
+});
+```
+
+**Callback Reference:**
+
+| Callback | Parameters | When Called | Use Case |
+|----------|-----------|-------------|----------|
+| `onProgress` | `(current, total, stage)` | After each data chunk sent | Progress bars, upload percentage |
+| `onStatusChange` | `(message)` | At each operation stage | Status messages, user feedback |
+| `onUploadComplete` | `(uploadTimeSeconds)` | Upload done, before refresh | Track upload performance |
+| `onComplete` | `(uploadTime, refreshTime, totalTime)` | After refresh completes | Final timing summary |
+
 **Supported Refresh Modes:**
 - `RefreshMode.FULL` - Full refresh (recommended, ~15s)
 - `RefreshMode.FAST` - Fast refresh if supported (~2s, may have ghosting)
