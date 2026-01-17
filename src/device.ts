@@ -432,6 +432,7 @@ export class OpenDisplayDevice {
       onProgress?: (current: number, total: number, stage: string) => void;
       onStatusChange?: (message: string) => void;
       onUploadComplete?: (uploadTimeSeconds: number) => void;
+      onComplete?: (uploadTime: number, refreshTime: number, totalTime: number) => void;
     } = {}
   ): Promise<void> {
     this.ensureConnected();
@@ -443,6 +444,7 @@ export class OpenDisplayDevice {
     const onProgress = options.onProgress;
     const onStatusChange = options.onStatusChange;
     const onUploadComplete = options.onUploadComplete;
+    const onComplete = options.onComplete;
 
     console.log(
       `Uploading image (${this.width}x${this.height}, ${ColorScheme[this.colorScheme]})`
@@ -476,6 +478,7 @@ export class OpenDisplayDevice {
           onProgress,
           onStatusChange,
           onUploadComplete,
+          onComplete,
         });
       } else {
         console.log(
@@ -488,6 +491,7 @@ export class OpenDisplayDevice {
           onProgress,
           onStatusChange,
           onUploadComplete,
+          onComplete,
         });
       }
     } else {
@@ -499,6 +503,7 @@ export class OpenDisplayDevice {
         onProgress,
         onStatusChange,
         onUploadComplete,
+        onComplete,
       });
     }
 
@@ -518,6 +523,7 @@ export class OpenDisplayDevice {
     onProgress?: (current: number, total: number, stage: string) => void;
     onStatusChange?: (message: string) => void;
     onUploadComplete?: (uploadTimeSeconds: number) => void;
+    onComplete?: (uploadTime: number, refreshTime: number, totalTime: number) => void;
   }): Promise<void> {
     const {
       imageData,
@@ -528,6 +534,7 @@ export class OpenDisplayDevice {
       onProgress,
       onStatusChange,
       onUploadComplete,
+      onComplete,
     } = params;
 
     // Clear any stale responses from previous operations
@@ -601,6 +608,46 @@ export class OpenDisplayDevice {
         onStatusChange?.(
           `Refresh complete (${refreshTime.toFixed(1)}s)`
         );
+
+        // Call completion callback with all timing info
+        onComplete?.(uploadTime, refreshTime, totalTime);
+      } else if (responseCode === CommandCode.REFRESH_TIMEOUT) {
+        throw new ProtocolError('Display refresh timed out');
+      } else {
+        throw new ProtocolError(
+          `Unexpected refresh response: 0x${responseCode.toString(16).padStart(4, '0')}`
+        );
+      }
+    } else {
+      // Auto-completed: device sent END response (0x0072) after receiving all chunks
+      const uploadTime = (Date.now() - uploadStartTime) / 1000;
+      onUploadComplete?.(uploadTime);
+      onStatusChange?.(
+        `Upload complete (${uploadTime.toFixed(1)}s), refreshing display...`
+      );
+      console.log(`Auto-completed upload in ${uploadTime.toFixed(1)}s, waiting for refresh...`);
+
+      // CRITICAL: Still need to wait for REFRESH_COMPLETE (0x0073)!
+      // The 0x0072 response only means upload is done, NOT that refresh is complete
+      const refreshStartTime = Date.now();
+      const refreshResponse = await this.connection!.readResponse(
+        OpenDisplayDevice.TIMEOUT_REFRESH
+      );
+
+      const [responseCode] = checkResponseType(refreshResponse);
+
+      if (responseCode === CommandCode.REFRESH_COMPLETE) {
+        const refreshTime = (Date.now() - refreshStartTime) / 1000;
+        const totalTime = (Date.now() - uploadStartTime) / 1000;
+        console.log(
+          `Refresh complete (${refreshTime.toFixed(1)}s), total time: ${totalTime.toFixed(1)}s`
+        );
+        onStatusChange?.(
+          `Refresh complete (${refreshTime.toFixed(1)}s)`
+        );
+
+        // Call completion callback with all timing info
+        onComplete?.(uploadTime, refreshTime, totalTime);
       } else if (responseCode === CommandCode.REFRESH_TIMEOUT) {
         throw new ProtocolError('Display refresh timed out');
       } else {
